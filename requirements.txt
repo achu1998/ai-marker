@@ -1,0 +1,19 @@
+# Core dependencies
+streamlit>=1.28.0
+httpx>=0.24.0
+PyPDF2>=3.0.0
+python-dotenv>=1.0.0
+Pillow>=10.0.0
+
+# OCR and document processing
+paddleocr>=2.7.0
+paddlepaddle>=2.5.0
+opencv-python>=4.8.0
+pdf2image>=1.16.0
+
+# PDF generation
+reportlab>=4.0.0
+
+# LLM providers (optional for cloud deployment)
+anthropic>=0.18.0
+google-genai>=0.1.0

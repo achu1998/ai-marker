@@ -1,0 +1,6 @@
+.env
+ai-marker
+feedback_pdfs
+temp_processing
+ai_marker.db
+__pycache__
