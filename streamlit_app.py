@@ -7,6 +7,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List
 import os
+import traceback
 
 # Import local modules
 from ollama_client import OllamaClient
@@ -81,38 +82,38 @@ st.markdown("""
 # Initialize session state
 def initialize_session_state():
     """Initialize all session state variables"""
-    if 'session_id' not in st.session_state:
+    if "session_id" not in st.session_state:
         st.session_state.session_id = str(uuid.uuid4())
-    
-    if 'ollama_client' not in st.session_state:
+
+    if "ollama_client" not in st.session_state:
         try:
             st.session_state.ollama_client = OllamaClient()
         except Exception as e:
             st.error(f"Failed to initialize LLM client: {str(e)}")
             st.stop()
-    
-    if 'doc_processor' not in st.session_state:
+
+    if "doc_processor" not in st.session_state:
         st.session_state.doc_processor = DocumentProcessor()
-    
-    if 'ocr_engine' not in st.session_state:
+
+    if "ocr_engine" not in st.session_state:
         st.session_state.ocr_engine = OCREngine()
-    
-    if 'feedback_generator' not in st.session_state:
+
+    if "feedback_generator" not in st.session_state:
         st.session_state.feedback_generator = FeedbackGenerator()
-    
-    if 'database' not in st.session_state:
+
+    if "database" not in st.session_state:
         st.session_state.database = Database()
-    
-    if 'grading_results' not in st.session_state:
+
+    if "grading_results" not in st.session_state:
         st.session_state.grading_results = []
-    
-    if 'current_rubric' not in st.session_state:
+
+    if "current_rubric" not in st.session_state:
         st.session_state.current_rubric = None
-    
-    if 'current_question' not in st.session_state:
+
+    if "current_question" not in st.session_state:
         st.session_state.current_question = None
-    
-    if 'assignment_name' not in st.session_state:
+
+    if "assignment_name" not in st.session_state:
         st.session_state.assignment_name = "Untitled Assignment"
 
 # Process uploaded document
@@ -137,48 +138,112 @@ def extract_text_from_document(doc_data: Dict, use_ocr: bool = False, document_t
         document_type: Type of document ("answer_sheet", "rubric", "question") for appropriate messaging
     """
     try:
+        # Validate doc_data structure
+        if not doc_data or not isinstance(doc_data, dict):
+            st.error(f"Invalid document data structure for {document_type}")
+            return ""
+        
         # For typed documents with extractable text, use direct extraction
         if doc_data.get("has_extractable_text") and not use_ocr:
-            text_parts = []
-            for page in doc_data["pages"]:
-                if page.get("has_text"):
-                    text_parts.append(page["text"])
-            extracted = "\n\n".join(text_parts)
-            if extracted.strip():  # Only return if we got meaningful text
-                return extracted
+            # Validate pages structure exists
+            if "pages" not in doc_data or not isinstance(doc_data.get("pages"), list):
+                print(f"WARNING: Document missing pages structure. Fall through to OCR")
+            else:
+                text_parts = []
+                for page_idx, page in enumerate(doc_data["pages"]):
+                    if not isinstance(page, dict):
+                        print(f"WARNING: Page {page_idx} is not a dict")
+                        continue
+                    
+                    if page.get("has_text") and page.get("text"):
+                        text = page["text"].strip()
+                        if text:  # Only add non-empty text
+                            text_parts.append(text)
+                        else:
+                            print(f"WARNING: Page {page_idx} marked has_text but empty")
+                    else:
+                        print(f"INFO: Page {page_idx} has no extractable text")
+                
+                extracted = " ".join(text_parts)
+                if extracted.strip():
+                    print(f"Successfully extracted {len(extracted)} characters from {document_type}")
+                    return extracted
+                else:
+                    print(f"WARNING: {document_type} marked as typed but no text extracted. Fall through to OCR as fallback")
         
         # For scanned/image documents, use OCR/vision
-                # For scanned/image documents, use OCR/vision
-        if doc_data.get("requires_ocr") or use_ocr:
-            # Only show special message for answer sheets
+        if doc_data.get("requires_ocr") or use_ocr or not doc_data.get("has_extractable_text"):
             if document_type == "answer_sheet" and use_ocr:
-                st.info("📝 Processing handwritten answer sheet with vision model (this may take longer)...")
+                st.info("📝 Processing handwritten answer sheet with vision model. This may take longer...")
             
-            # If document processor created images, use them
-            if "image_path" in doc_data:
-                # For handwritten, use higher threshold to trigger vision model faster
-                # For typed (rubric/question), use lower threshold to try PaddleOCR first
-                confidence_threshold = 0.9 if use_ocr else 0.70
-                return st.session_state.ocr_engine.smart_extract(
-                    doc_data["image_path"],
-                    st.session_state.ollama_client,
-                    confidence_threshold=confidence_threshold
-                )
-            else:
-                # For PDF without embedded text, we need image extraction
-                st.warning("⚠️ Handwritten PDF requires image conversion. Please ensure PDF is scanned at 300 DPI.")
+            if "image_path" not in doc_data:
+                st.error(f"Document requires OCR but no image available")
+                print(f"ERROR: {document_type} requires OCR but no image_path in doc_data")
                 return ""
-        else:
-            st.error("Document requires OCR but no image available")
-            return ""
+            
+            confidence_threshold = 0.9 if use_ocr else 0.70
+            result = st.session_state.ocr_engine.smart_extract(
+                doc_data["image_path"],
+                st.session_state.ollama_client,
+                confidence_threshold=confidence_threshold
+            )
+            
+            if result and result.strip():
+                print(f"Successfully OCRd {document_type}, extracted {len(result)} characters")
+                return result
+            else:
+                st.error(f"Failed to extract text from {document_type} using OCR")
+                return ""
+        
+        st.error(f"Unable to extract text from {document_type}")
+        return ""
+        
     except Exception as e:
-        st.error(f"Error extracting text: {str(e)}")
+        st.error(f"Error extracting text from {document_type}: {str(e)}")
+        print(f"EXCEPTION in extract_text_from_document: {str(e)}")
+        traceback.print_exc()
         return ""
 
-# Grade submission
-def grade_submission(student_name: str, answer_text: str, 
-                    question_text: str, rubric: Dict) -> Dict:
-    """Grade a student submission"""
+
+def grade_submission(student_name: str, answer_text: str, question_text: str, rubric: Dict) -> Dict:
+    """Grade a student submission
+    
+    Args:
+        student_name: Student's name
+        answer_text: Extracted answer text
+        question_text: Question text
+        rubric: Grading rubric
+    """
+    # Input validation
+    if not student_name or not isinstance(student_name, str):
+        st.error("Student name is required")
+        return None
+    
+    if not answer_text or not isinstance(answer_text, str):
+        st.error("Answer text is required and must be non-empty")
+        return None
+    
+    if not answer_text.strip():
+        st.error("Answer appears to be empty (only whitespace)")
+        return None
+    
+    if not rubric or not isinstance(rubric, dict):
+        st.error("Rubric is required and must be a dictionary")
+        return None
+    
+    if "criteria" not in rubric or not rubric.get("criteria"):
+        st.error("Rubric has no criteria defined")
+        return None
+    
+    # question_text can be empty, but should be a string
+    if not isinstance(question_text, str):
+        question_text = ""
+    
+    print(f"Grading submission for {student_name}")
+    print(f"Answer length: {len(answer_text)} characters")
+    print(f"Rubric criteria: {len(rubric.get('criteria', []))}")
+    print(f"Question provided: {bool(question_text.strip())}")
+    
     try:
         with st.spinner("🤖 AI is grading the submission..."):
             result = st.session_state.ollama_client.grade_submission(
@@ -186,30 +251,38 @@ def grade_submission(student_name: str, answer_text: str,
                 question=question_text,
                 rubric=rubric
             )
-            
-            # Add timestamp
-            result['grading_timestamp'] = datetime.now().isoformat()
-            result['student_name'] = student_name
-            
-            # Save to database
-            submission_id = st.session_state.database.add_submission(
-                session_id=st.session_state.session_id,
-                student_name=student_name,
-                extracted_answer=answer_text
-            )
-            
-            result_id = st.session_state.database.save_grading_result(
-                submission_id=submission_id,
-                grading_data=result,
-                model_used=result.get('model_used', 'unknown')
-            )
-            
-            result['result_id'] = result_id
-            
-            return result
-            
+        
+        if not result:
+            st.error("Grading failed: No result returned")
+            return None
+        
+        # Add timestamp
+        result["grading_timestamp"] = datetime.now().isoformat()
+        result["student_name"] = student_name
+        
+        # Save to database
+        submission_id = st.session_state.database.add_submission(
+            session_id=st.session_state.session_id,
+            student_name=student_name,
+            extracted_answer=answer_text
+        )
+        
+        result_id = st.session_state.database.save_grading_result(
+            submission_id=submission_id,
+            grading_data=result,
+            model_used=result.get("model_used", "unknown")
+        )
+        
+        result["result_id"] = result_id
+        
+        print(f"Grading complete: {result.get('total_score', 0)}/{result.get('max_score', 0)}")
+        
+        return result
+        
     except Exception as e:
         st.error(f"Error during grading: {str(e)}")
+        print(f"EXCEPTION in grade_submission: {str(e)}")
+        traceback.print_exc()
         return None
 
 # Display grading results
@@ -424,8 +497,25 @@ def main():
                 if answer_doc:
                     status_text.text("🔍 Extracting student answer...")
                     progress_bar.progress(40)
-                    
-                    # Use document type to optimize extraction
+
+                    # Process answer sheet
+                    answer_doc_obj = process_document(answer_file, "answer_sheet")
+                    if answer_doc_obj is None:
+                        st.error("Failed to process answer sheet")
+                        st.stop()
+
+                    # Extract text from answer
+                    extracted_answer = extract_text_from_document(
+                        answer_doc_obj,
+                        use_ocr=False,
+                        document_type="answer_sheet"
+                    )
+
+                    if not extracted_answer or not extracted_answer.strip():
+                        st.error("Failed to extract text from answer sheet")
+                        st.info("Try forcing OCR or check if document is typed vs scanned")
+                        st.stop()
+
                     force_vision = (answer_type == "Handwritten")
                     answer_text = extract_text_from_document(answer_doc, use_ocr=force_vision, document_type="answer_sheet")
 
@@ -439,7 +529,7 @@ def main():
                         result = grade_submission(
                             student_name=student_name,
                             answer_text=answer_text,
-                            question_text=st.session_state.current_question or "No specific question provided",
+                            question_text=st.session_state.current_question or "",
                             rubric=st.session_state.current_rubric
                         )
                         
@@ -524,8 +614,9 @@ def main():
             # Calculate statistics
             avg_score = sum(r['percentage'] for r in all_results) / len(all_results)
             st.metric("Average Score", f"{avg_score:.1f}%")
-            
-            # Display results table
+
+            st.markdown("---")
+
             st.markdown("### Individual Results")
             for result in all_results:
                 with st.expander(f"📄 {result['student_name']} - {result['percentage']:.1f}%"):
