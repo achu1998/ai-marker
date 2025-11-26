@@ -128,26 +128,49 @@ def process_document(uploaded_file, document_type: str) -> Dict:
         return None
 
 # Extract text from document
-def extract_text_from_document(doc_data: Dict, use_ocr: bool = False) -> str:
-    """Extract text from processed document"""
+def extract_text_from_document(doc_data: Dict, use_ocr: bool = False, document_type: str = "document") -> str:
+    """Extract text from processed document
+    
+    Args:
+        doc_data: Processed document data
+        use_ocr: Force OCR/vision processing
+        document_type: Type of document ("answer_sheet", "rubric", "question") for appropriate messaging
+    """
     try:
+        # For typed documents with extractable text, use direct extraction
         if doc_data.get("has_extractable_text") and not use_ocr:
-            # Use extracted text from PDF
             text_parts = []
             for page in doc_data["pages"]:
                 if page.get("has_text"):
                     text_parts.append(page["text"])
-            return "\n\n".join(text_parts)
-        else:
-            # Use OCR or vision model
+            extracted = "\n\n".join(text_parts)
+            if extracted.strip():  # Only return if we got meaningful text
+                return extracted
+        
+        # For scanned/image documents, use OCR/vision
+                # For scanned/image documents, use OCR/vision
+        if doc_data.get("requires_ocr") or use_ocr:
+            # Only show special message for answer sheets
+            if document_type == "answer_sheet" and use_ocr:
+                st.info("📝 Processing handwritten answer sheet with vision model (this may take longer)...")
+            
+            # If document processor created images, use them
             if "image_path" in doc_data:
+                # For handwritten, use higher threshold to trigger vision model faster
+                # For typed (rubric/question), use lower threshold to try PaddleOCR first
+                confidence_threshold = 0.9 if use_ocr else 0.70
                 return st.session_state.ocr_engine.smart_extract(
                     doc_data["image_path"],
-                    st.session_state.ollama_client
+                    st.session_state.ollama_client,
+                    confidence_threshold=confidence_threshold
                 )
             else:
-                st.error("Document requires OCR but no image available")
+                # For PDF without embedded text, we need image extraction
+                st.warning("⚠️ Handwritten PDF requires image conversion. Please ensure PDF is scanned at 300 DPI.")
                 return ""
+        else:
+            st.error("Document requires OCR but no image available")
+            return ""
     except Exception as e:
         st.error(f"Error extracting text: {str(e)}")
         return ""
@@ -271,7 +294,7 @@ def main():
         st.markdown("### 1️⃣ Question Paper")
         question_file = st.file_uploader(
             "Upload question paper",
-            type=['pdf', 'jpg', 'jpeg', 'png'],
+            type=['pdf'],
             key="question_upload",
             help="Upload the assignment or exam question"
         )
@@ -280,7 +303,7 @@ def main():
         st.markdown("### 2️⃣ Grading Rubric")
         rubric_file = st.file_uploader(
             "Upload grading rubric",
-            type=['pdf', 'jpg', 'jpeg', 'png'],
+            type=['pdf'],
             key="rubric_upload",
             help="Upload the rubric with grading criteria"
         )
@@ -290,43 +313,52 @@ def main():
             with st.spinner("Processing question paper..."):
                 question_doc = process_document(question_file, "question_paper")
                 if question_doc:
-                    question_text = extract_text_from_document(question_doc)
+                    question_text = extract_text_from_document(question_doc, document_type="question")
                     st.session_state.current_question = question_text
                     st.success("✓ Question paper processed")
+
         
         if rubric_file and st.button("📤 Process Rubric"):
             with st.spinner("Processing rubric..."):
                 rubric_doc = process_document(rubric_file, "rubric")
                 if rubric_doc:
-                    rubric_text = extract_text_from_document(rubric_doc)
+                    rubric_text = extract_text_from_document(rubric_doc, document_type="rubric")
                     
-                    # Extract structured rubric
-                    with st.spinner("🤖 Extracting rubric structure..."):
-                        structured_rubric = st.session_state.ollama_client.extract_rubric_structure(rubric_text)
-                        st.session_state.current_rubric = structured_rubric
+                    if not rubric_text or len(rubric_text.strip()) < 20:
+                        st.error("⚠️ Could not extract text from rubric. Please ensure the image is clear and readable.")
+                    else:
+                        # Show extracted text for debugging
+                        with st.expander("📄 Extracted Rubric Text (click to verify)"):
+                            st.text(rubric_text)
                         
-                        # Save to database
-                        st.session_state.database.save_rubric(
-                            session_id=st.session_state.session_id,
-                            rubric_data=structured_rubric,
-                            question_text=st.session_state.current_question or ""
-                        )
-                        
-                        st.success("✓ Rubric processed and structured")
+                        # Extract structured rubric
+                        with st.spinner("🤖 Extracting rubric structure..."):
+                            structured_rubric = st.session_state.ollama_client.extract_rubric_structure(rubric_text)
+                            st.session_state.current_rubric = structured_rubric
+                            
+                            # Save to database
+                            st.session_state.database.save_rubric(
+                                session_id=st.session_state.session_id,
+                                rubric_data=structured_rubric,
+                                question_text=st.session_state.current_question or ""
+                            )
+                            
+                            st.success(f"✓ Rubric processed ({len(structured_rubric.get('criteria', []))} criteria found)")
         
         st.markdown("---")
         
         # Display current configuration status
         st.markdown("### 📊 Status")
         if st.session_state.current_question:
-            st.success("✓ Question loaded")
+            st.success("✓ Question loaded (optional)")
         else:
-            st.info("○ Question not loaded")
-        
+            st.info("○ Question not loaded (optional)")
+
         if st.session_state.current_rubric:
             st.success(f"✓ Rubric loaded ({len(st.session_state.current_rubric.get('criteria', []))} criteria)")
         else:
-            st.info("○ Rubric not loaded")
+            st.error("⚠️ Rubric required - please upload")
+
     
     # Main content area - Tabs
     tab1, tab2, tab3, tab4 = st.tabs(["📝 Grade Submission", "👁️ View Question & Rubric", 
@@ -335,10 +367,6 @@ def main():
     # Tab 1: Grade Submission
     with tab1:
         st.markdown("## Grade Student Submission")
-        
-        if not st.session_state.current_question:
-            st.warning("⚠️ Please upload and process the question paper first (see sidebar)")
-            st.stop()
         
         if not st.session_state.current_rubric:
             st.warning("⚠️ Please upload and process the grading rubric first (see sidebar)")
@@ -352,14 +380,23 @@ def main():
                 placeholder="e.g., John Doe",
                 help="Enter the student's name"
             )
-        
+
         with col2:
             student_id = st.text_input(
                 "Student ID (Optional)",
                 placeholder="e.g., 12345",
                 help="Optional student identifier"
             )
-        
+
+        # Document type selector
+        st.markdown("### 📄 Answer Sheet Type")
+        answer_type = st.radio(
+            "Select document type:",
+            options=["Typed/Printed", "Handwritten"],
+            horizontal=True,
+            help="Select 'Handwritten' for better OCR accuracy on handwritten submissions"
+        )
+
         # Answer sheet upload
         st.markdown("### 3️⃣ Upload Answer Sheet")
         answer_file = st.file_uploader(
@@ -387,7 +424,12 @@ def main():
                 if answer_doc:
                     status_text.text("🔍 Extracting student answer...")
                     progress_bar.progress(40)
-                    answer_text = extract_text_from_document(answer_doc)
+                    
+                    # Use document type to optimize extraction
+                    force_vision = (answer_type == "Handwritten")
+                    answer_text = extract_text_from_document(answer_doc, use_ocr=force_vision, document_type="answer_sheet")
+
+
                     
                     if answer_text:
                         status_text.text("🤖 Grading with AI...")
@@ -397,7 +439,7 @@ def main():
                         result = grade_submission(
                             student_name=student_name,
                             answer_text=answer_text,
-                            question_text=st.session_state.current_question,
+                            question_text=st.session_state.current_question or "No specific question provided",
                             rubric=st.session_state.current_rubric
                         )
                         
@@ -461,6 +503,11 @@ def main():
         if st.session_state.current_rubric:
             st.markdown("### Grading Rubric")
             st.json(st.session_state.current_rubric)
+            if st.session_state.current_rubric.get("rubric_type") == "banded":
+                st.markdown("### 📊 Rubric Criteria")
+                for criterion in st.session_state.current_rubric.get("criteria", []):
+                    st.markdown(f"**{criterion['criterion_name']}** ({criterion['weight_percentage']}%)")
+                    st.write(f"Max Points: {criterion['max_points']}")
         else:
             st.warning("No rubric loaded yet")
     

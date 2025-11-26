@@ -29,7 +29,7 @@ class OllamaClient:
     def __init__(self):
         """Initialize LLM client based on config.py settings"""
         self.deployment_mode = DEPLOYMENT_MODE
-        self.timeout = 600.0  # 10 minutes for complex grading
+        self.timeout = 1200.0  # 10 minutes for complex grading
         self.provider = LLM_PROVIDER
         
         if self.deployment_mode == "cloud":
@@ -218,42 +218,81 @@ Extract this into structured JSON format following the specified schema."""
         """
         system_prompt = AI_MARKER_SYSTEM_PROMPT
         
+        # Check rubric type
+        rubric_type = rubric.get("rubric_type", "simple")
+        
+        if rubric_type == "banded":
+            grading_instructions = """
+        ## Banded Rubric Instructions
+
+        **HOW BANDED RUBRICS WORK:**
+        Each criterion has score bands (0-49, 50-59, 60-69, 70-79, 80-89, 90-100).
+        These bands represent performance quality AS A PERCENTAGE.
+
+        **YOUR JOB:**
+        1. For each criterion, find which band describes the student's work
+        2. Pick a percentage from that band (use middle if unsure: 55 for 50-59, 65 for 60-69, 75 for 70-79, etc.)
+        3. Convert percentage to points: (percentage ÷ 100) × max_points
+
+        **EXAMPLE:**
+        - Criterion: "Literature Review" (max_points: 40)
+        - Student work matches: "60-69: Moderate literature review"
+        - Choose: 65% (middle of 60-69 band)
+        - Calculate: 65 ÷ 100 × 40 = 26 points
+        - Result: awarded_points = 26
+
+        **IMPORTANT:**
+        - Use middle of band as default (55, 65, 75, 85, 95)
+        - NEVER put the percentage as the awarded_points
+        - ALWAYS multiply by max_points to get actual points
+        """
+
+
+        else:
+            grading_instructions = """
+    ## Simple Rubric Grading Instructions
+    Each criterion has a maximum point value. Determine if the criterion is satisfied
+    and award full or partial points based on the rubric requirements.
+    """
+        
         prompt = f"""# Grading Task
 
-## Question
-{question}
+    {grading_instructions}
 
-## Student Answer
-{student_answer}
+    ## Question (if provided)
+    {question}
 
-## Grading Rubric
-{json.dumps(rubric, indent=2)}
+    ## Student Answer
+    {student_answer}
 
-## Instructions
-Evaluate this student answer against the rubric following these steps:
+    ## Grading Rubric
+    {json.dumps(rubric, indent=2)}
 
-1. Read the complete rubric carefully
-2. Evaluate ALL criteria together
-3. For EACH criterion, determine if SATISFIED or NOT SATISFIED
-4. Provide specific evidence from the student's answer
-5. Award points according to rubric
-6. Calculate total score accurately
-7. Generate constructive feedback
+    ## Your Task
+    Evaluate this student answer against the rubric following these steps:
 
-## Critical Requirements
-- Quote specific parts of student answer as evidence
-- Be fair but maintain standards
-- Give partial credit where appropriate
-- Provide actionable improvement suggestions
-- Ensure arithmetic is correct
+    1. Read the rubric structure carefully (banded or simple)
+    2. For banded rubrics: Identify which band each criterion falls into
+    3. For simple rubrics: Determine if each criterion is satisfied
+    4. Provide specific evidence from the student's answer
+    5. Calculate total score accurately
+    6. Generate constructive feedback
 
-Return your evaluation in the specified JSON format."""
+    ## Critical Requirements
+    - Quote specific parts of student answer as evidence
+    - Be fair but maintain standards
+    - For banded rubrics: Use the full score range, not just minimum
+    - Provide actionable improvement suggestions
+    - Ensure arithmetic is correct
+
+    Return your evaluation in the specified JSON format."""
+
         
         response = self._make_request(
             prompt=prompt,
             system=system_prompt,
             temperature=0.1,  # Low temperature for consistency
-            max_tokens=2000,
+            max_tokens=3000,
             response_format="json"
         )
         
@@ -279,12 +318,22 @@ Return your evaluation in the specified JSON format."""
         )
         
         # Calculate max score from rubric
-        max_score = rubric.get("total_points", 0)
-        if max_score == 0:
+        rubric_type = rubric.get("rubric_type", "simple")
+        
+        if rubric_type == "banded":
+            # For banded rubrics, sum the max_points from each criterion
             max_score = sum(
                 criterion.get("max_points", 0)
                 for criterion in rubric.get("criteria", [])
             )
+        else:
+            # For simple rubrics
+            max_score = rubric.get("total_points", 0)
+            if max_score == 0:
+                max_score = sum(
+                    criterion.get("max_points", 0)
+                    for criterion in rubric.get("criteria", [])
+                )
         
         # Override LLM calculations with correct arithmetic
         result["total_score"] = calculated_total
@@ -294,5 +343,6 @@ Return your evaluation in the specified JSON format."""
         # Add metadata
         result["model_used"] = self.model
         result["grading_method"] = "rubric_based_llm"
+        result["rubric_type"] = rubric_type
         
         return result

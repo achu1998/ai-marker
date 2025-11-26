@@ -84,39 +84,70 @@ def get_rubric_extraction_prompt():
 
 Your task: Extract all grading criteria from the provided rubric text and structure them.
 
+## Rubric Format Support
+This system supports multiple rubric formats:
+1. **Simple criterion-based**: Each criterion has fixed points
+2. **Banded/Range-based**: Criteria have score ranges (e.g., 0-49, 50-59, etc.) with descriptions
+
 ## Instructions
-1. Identify each distinct grading criterion
-2. Extract the criterion name/description
-3. Identify the point value for each criterion
-4. Extract any detailed requirements or expectations
-5. Maintain the original intent and meaning
+1. Identify rubric type (simple or banded)
+2. Extract each criterion name and weight/percentage
+3. For banded rubrics: Extract all score ranges and their descriptions
+4. For simple rubrics: Extract criterion description and max points
+5. Calculate total possible points
 
 ## Output Format (JSON)
+
+### For Banded Rubrics:
 {
+  "rubric_type": "banded",
   "criteria": [
     {
-      "criterion_name": "Short descriptive name",
-      "max_points": number,
-      "description": "Detailed description of what satisfies this criterion",
-      "requirements": ["specific requirement 1", "requirement 2"]
+      "criterion_name": "Literature Review",
+      "weight_percentage": 40,
+      "max_points": 40,
+      "bands": [
+        {"range": "0-49", "description": "No or very little literature review..."},
+        {"range": "50-59", "description": "Limited review, brief reference..."},
+        {"range": "60-69", "description": "Moderate literature review..."},
+        {"range": "70-79", "description": "Good literature review..."},
+        {"range": "80-89", "description": "Very good review..."},
+        {"range": "90-100", "description": "Very thorough literature review..."}
+      ]
     }
   ],
-  "total_points": number,
-  "additional_notes": "any general instructions or notes"
+  "total_points": 100
+}
+
+### For Simple Rubrics:
+{
+  "rubric_type": "simple",
+  "criteria": [
+    {
+      "criterion_name": "Problem Identification",
+      "max_points": 3,
+      "description": "Correctly identifies the core issue",
+      "requirements": ["Identifies key problem", "Explains context"]
+    }
+  ],
+  "total_points": 10
 }
 
 ## Rules
 - Extract ALL criteria mentioned
-- Point values must sum to reasonable total
-- If point value not explicitly stated, infer from context
-- Preserve original language where possible
-- If rubric mentions "partial credit", note that in requirements
+- For banded rubrics, capture ALL score ranges (don't skip any)
+- Preserve exact descriptions from rubric
+- If percentages given (e.g., "40%", "30%"), these represent the weight/portion of the TOTAL grade (100 points)
+- Convert percentage weights to points: weight_percentage value = max_points for that criterion
+  Example: "Literature Review (40%)" means max_points = 40, weight_percentage = 40
+  Example: "Research Progress (30%)" means max_points = 30, weight_percentage = 30
+- The total_points should always equal the sum of all max_points (typically 100)
 
 ## Quality Checks
-- Verify all criteria are captured
-- Check point values are reasonable
-- Ensure descriptions are clear and actionable
-- Confirm total points calculation
+- Verify all criteria captured
+- Check point values sum correctly
+- Ensure all bands/ranges included
+- Preserve original wording
 
 Return ONLY valid JSON, no additional text.
 """
