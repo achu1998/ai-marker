@@ -1,81 +1,72 @@
-# OCR Engine for text extraction from images and handwritten documents
+# OCR Engine for text extraction from images and handwritten documents (EasyOCR version)
 
-from paddleocr import PaddleOCR
-import base64
-from typing import Dict, Optional
-from config import USE_GPU, OCR_LANGUAGE
+import easyocr
+from typing import Dict
 
 class OCREngine:
-    """Handles OCR for printed and handwritten text extraction"""
+    """Handles OCR for printed and handwritten text extraction using EasyOCR"""
     
-    def __init__(self):
-        # Initialize PaddleOCR
-        self.paddle_ocr = PaddleOCR(
-            use_angle_cls=True,
-            lang=OCR_LANGUAGE,
-        )
+    def __init__(self, languages=None):
+        """
+        Initialize EasyOCR
+        Args:
+            languages: List of languages (default: English)
+        """
+        if languages is None:
+            languages = ['en']  # Equivalent to OCR_LANGUAGE
+            
+        # EasyOCR loads GPU automatically if available (safe on M-series)
+        self.reader = easyocr.Reader(languages)
     
     def extract_text_from_image(self, image_path: str) -> Dict:
         """
-        Extract text from image using PaddleOCR
-        
-        Args:
-            image_path: Path to image file
+        Extract text from image using EasyOCR
         
         Returns:
             Dict with extracted text and confidence score
         """
         try:
-            result = self.paddle_ocr.ocr(image_path, cls=True)
-            
-            if not result or not result[0]:
+            # EasyOCR returns: [ [bbox, text, confidence], ... ]
+            result = self.reader.readtext(image_path, detail=1, paragraph=False)
+
+            if not result:
                 return {
                     "text": "",
                     "confidence": 0.0,
-                    "method": "paddleocr",
+                    "method": "easyocr",
                     "success": False
                 }
             
-            # Combine all detected text blocks
             text_blocks = []
-            total_confidence = 0
-            
-            for line in result[0]:
-                text = line[1][0]
-                confidence = line[1][1]
+            confidences = []
+
+            for block in result:
+                _, text, conf = block
                 text_blocks.append(text)
-                total_confidence += confidence
-            
-            avg_confidence = total_confidence / len(result[0]) if result[0] else 0
-            
+                confidences.append(conf)
+
+            avg_conf = sum(confidences) / len(confidences) if confidences else 0
+
             return {
                 "text": "\n".join(text_blocks),
-                "confidence": avg_confidence,
-                "method": "paddleocr",
+                "confidence": avg_conf,
+                "method": "easyocr",
                 "success": True,
                 "num_lines": len(text_blocks)
             }
-            
+
         except Exception as e:
             return {
                 "text": "",
                 "confidence": 0.0,
-                "method": "paddleocr",
+                "method": "easyocr",
                 "success": False,
                 "error": str(e)
             }
     
-    def extract_handwritten_text(self, image_path: str, 
-                                 ollama_client = None) -> Dict:
+    def extract_handwritten_text(self, image_path: str, ollama_client=None) -> Dict:
         """
-        Extract handwritten text using vision LLM (fallback for low OCR confidence)
-        
-        Args:
-            image_path: Path to image file
-            ollama_client: OllamaClient instance with vision model
-        
-        Returns:
-            Dict with extracted text
+        Extract handwritten text using a Vision LLM fallback
         """
         if ollama_client is None:
             return {
@@ -87,17 +78,15 @@ class OCREngine:
             }
         
         try:
-            # This would call the vision model
-            # Implementation depends on whether using local Llama 3.2-Vision or cloud API
             extracted = ollama_client.extract_text_from_image(image_path)
             
             return {
                 "text": extracted,
-                "confidence": 0.85,  # Vision models don't provide confidence typically
+                "confidence": 0.85,  # Vision LLMs don't provide confidence
                 "method": "vision_llm",
                 "success": True
             }
-            
+        
         except Exception as e:
             return {
                 "text": "",
@@ -107,32 +96,21 @@ class OCREngine:
                 "error": str(e)
             }
     
-    def smart_extract(self, image_path: str, ollama_client = None, 
-                     confidence_threshold: float = 0.75) -> str:
+    def smart_extract(self, image_path: str, ollama_client=None, 
+                      confidence_threshold: float = 0.75) -> str:
         """
-        Intelligently extract text using best available method
-        
-        Tries PaddleOCR first, falls back to vision LLM if confidence low
-        
-        Args:
-            image_path: Path to image file
-            ollama_client: OllamaClient instance (optional, for fallback)
-            confidence_threshold: Minimum confidence for PaddleOCR
-        
-        Returns:
-            Extracted text string
+        Uses EasyOCR first, falls back to Vision LLM if confidence is low
         """
-        # Try PaddleOCR first
         ocr_result = self.extract_text_from_image(image_path)
         
         if ocr_result["success"] and ocr_result["confidence"] >= confidence_threshold:
             return ocr_result["text"]
         
-        # Fall back to vision LLM if available
+        # Fall back to vision model if provided
         if ollama_client is not None:
             vision_result = self.extract_handwritten_text(image_path, ollama_client)
             if vision_result["success"]:
                 return vision_result["text"]
         
-        # Return what we have, even if low confidence
+        # Return low-confidence OCR result anyway
         return ocr_result.get("text", "")

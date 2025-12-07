@@ -330,7 +330,7 @@ def display_grading_results(result: Dict):
         <div class="{css_class}">
             <h4>{status_icon} {criterion['criterion_name']} ({criterion['awarded_points']}/{criterion['max_points']} points)</h4>
             <p><strong>Evidence:</strong> {criterion.get('evidence', 'No evidence provided')}</p>
-            <p><strong>Feedback:</strong> {criterion.get('feedback', 'No feedback provided')}</p>
+            <p><strong>Feedback:</strong> {criterion.get('suggestion', 'No feedback provided')}</p>
         </div>
         """, unsafe_allow_html=True)
 
