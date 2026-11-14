@@ -214,12 +214,6 @@ The interface provides a split-view:
 
 ------------------------------------------------------------------------
 
-## 🎥 Demo Video
-
-(Add your demo video link here)
-
-------------------------------------------------------------------------
-
 # 🛠️ Troubleshooting
 
 ### ❌ "Cannot connect to Ollama"
