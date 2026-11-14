@@ -1,4 +1,46 @@
-# 🧠 AI Marker - Local Automated Grading Assistant
+<!-- portfolio:start -->
+<div align="center">
+
+<img src="docs/images/banner.svg" alt="AI Marker" width="100%" />
+
+# AI Marker
+
+**Privacy-first, fully local grading assistant for university teachers**
+
+![LLM Apps](https://img.shields.io/badge/LLM%20Apps-2025-6366f1?style=flat-square) [![Portfolio](https://img.shields.io/badge/Portfolio-ashween.space-0ea5e9?style=flat-square)](https://ashween.space/projects/ai-marker)
+
+</div>
+
+## About
+
+Rubric-based grading and handwriting recognition (OCR) running entirely on-device with local Large Language Models (Llama 3.1 and Llama 3.2 Vision). It produces detailed feedback and PDF reports without student data leaving the machine.
+
+Developed AI Marker, a privacy-first Streamlit application for university teachers to grade with AI assistance without compromising student data privacy.
+
+Integrated local Large Language Models (LLMs) through Ollama, using Llama 3.1 for rubric-based grading and Llama 3.2 Vision for handwriting recognition (optical character recognition, OCR) of scanned answer sheets.
+
+Implemented an end-to-end offline pipeline that structures evaluation criteria, generates detailed strengths/weaknesses feedback and produces professional PDF reports, while staying compliant with FERPA (the US law protecting student education records) through local data processing.
+
+| | |
+|---|---|
+| **Project** | AI Marker: Local Automated Grading Assistant |
+| **Project type** | Local LLM Application |
+
+## Demo
+
+<p align="center"><a href="https://www.youtube.com/watch?v=o-1gsWQgImw"><img src="https://img.youtube.com/vi/o-1gsWQgImw/hqdefault.jpg" alt="AI Marker demo" width="70%" /></a><br/><sub>▶ AI Marker demo (YouTube)</sub></p>
+
+## Tech stack
+
+`Python` · `Streamlit` · `Ollama` · `Llama 3.1` · `Llama 3.2 Vision`
+
+> Full write-up on the portfolio: **[ashween.space/projects/ai-marker](https://ashween.space/projects/ai-marker)**
+
+<!-- portfolio:end -->
+
+---
+
+## Overview
 
 A **privacy-first Streamlit application** that uses local LLM models to
 grade student submissions against rubrics.
@@ -8,8 +50,6 @@ compromising student data privacy**.
 
 All processing happens locally to maintain FERPA compliance and
 institutional data security.
-
-------------------------------------------------------------------------
 
 ## 📌 Features
 
